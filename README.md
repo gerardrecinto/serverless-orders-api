@@ -57,7 +57,20 @@ Trade-off: Lambda with DynamoDB suits spiky traffic and costs nothing idle. At s
 npm run typecheck && npm test && npm run build
 ```
 
-16 tests cover the API, the worker and the Terraform (no wildcard IAM actions, retention, tracing, point-in-time recovery, dead-letter queue, throttling). CI also runs `terraform fmt`, `terraform validate` and a Trivy scan. Deploy is a manual workflow that signs in with GitHub OIDC; see [docs/RUNBOOK.md](docs/RUNBOOK.md).
+21 tests cover the API, the DynamoDB and SQS adapters, the worker and the Terraform (no wildcard IAM actions, retention, tracing, point-in-time recovery, dead-letter queue, throttling). CI also runs `terraform fmt`, `terraform validate` and a Trivy scan. Deploy is a manual workflow that signs in with GitHub OIDC; see [docs/RUNBOOK.md](docs/RUNBOOK.md).
+
+## Measured
+
+From `npm run coverage`, `npm run bench` and `npm run build` on a laptop (Node 26, Apple silicon):
+
+| What | Result |
+|---|---|
+| Tests | 21 pass |
+| Line coverage | 94% (api, worker, validation, adapters; the unexercised lines are the environment wiring in `awsDeps`) |
+| Handler cost, `POST /orders` | 33,000 requests per second, p50 0.025 ms, p99 0.071 ms |
+| Lambda bundle | 1.4 MB, 255 KB gzipped |
+
+The handler number is in-process with in-memory dependencies. It leaves out API Gateway, DynamoDB and network time, so it shows the code adds almost nothing to a request, not what a client will see.
 
 ## Not covered
 

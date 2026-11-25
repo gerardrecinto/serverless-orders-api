@@ -19,7 +19,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
-      - run: npm test
+      - run: npm run coverage
       - run: npm run build
       - name: Lambda bundle is small enough
         run: test "$(stat -c %s dist/lambda.js)" -lt 3000000
