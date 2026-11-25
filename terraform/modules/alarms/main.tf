@@ -1,5 +1,35 @@
+data "aws_caller_identity" "current" {}
+
+# CloudWatch cannot publish to a topic encrypted with the AWS-managed SNS key,
+# so the topic uses its own key that lets CloudWatch alarms use it.
+resource "aws_kms_key" "alerts" {
+  description         = "${var.name} alert topic"
+  enable_key_rotation = true
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "AccountAdmin"
+        Effect    = "Allow"
+        Principal = { AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root" }
+        Action    = "kms:*"
+        Resource  = "*"
+      },
+      {
+        Sid       = "CloudWatchAlarms"
+        Effect    = "Allow"
+        Principal = { Service = "cloudwatch.amazonaws.com" }
+        Action    = ["kms:Decrypt", "kms:GenerateDataKey*"]
+        Resource  = "*"
+      },
+    ]
+  })
+}
+
 resource "aws_sns_topic" "alerts" {
-  name = "${var.name}-alerts"
+  name              = "${var.name}-alerts"
+  kms_master_key_id = aws_kms_key.alerts.id
 }
 
 resource "aws_sns_topic_subscription" "email" {
