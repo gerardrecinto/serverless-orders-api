@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>serverless-orders-api: Node.js and TypeScript on AWS Lambda</title>
+<meta name="description" content="Orders API on AWS: TypeScript Lambda behind API Gateway, SQS worker with a dead-letter queue, DynamoDB, Terraform and CI. Run the real handler in this page.">
+<link rel="icon" href="favicon.svg">
+<style>
+:root{--bg:#0f1115;--card:#171a21;--line:#272c36;--fg:#e6e8ec;--mut:#9aa3b2;--acc:#ff9900;--ok:#3ecf8e;--bad:#ff6b6b}
+@media (prefers-color-scheme:light){:root{--bg:#f7f8fa;--card:#fff;--line:#dfe3ea;--fg:#14171c;--mut:#566070;--acc:#b86900;--ok:#0a7f4f;--bad:#c0392b}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.55 system-ui,sans-serif}
+main{max-width:920px;margin:0 auto;padding:32px 20px 64px}h1{font-size:30px;margin:0 0 6px}h2{margin:36px 0 10px;font-size:20px}
+p.lead{color:var(--mut);margin:0 0 18px;font-size:18px}a{color:var(--acc)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px}
+pre,code{font-family:ui-monospace,Menlo,monospace;font-size:13px}pre{margin:0;white-space:pre-wrap;word-break:break-word}
+button{background:var(--acc);color:#111;border:0;border-radius:6px;padding:8px 14px;font-weight:600;cursor:pointer}
+button.alt{background:transparent;color:var(--fg);border:1px solid var(--line)}
+textarea,input{width:100%;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:8px;font:13px ui-monospace,Menlo,monospace}
+label{display:block;font-size:13px;color:var(--mut);margin:10px 0 4px}.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
+.ok{color:var(--ok)}.bad{color:var(--bad)}table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid var(--line);padding:6px 8px;text-align:left;font-size:14px}
+svg text{fill:var(--fg);font:12px system-ui,sans-serif}svg .b{fill:var(--card);stroke:var(--line)}svg .l{stroke:var(--mut);fill:none}
+</style>
+</head>
+<body>
+<main>
+<h1>serverless-orders-api</h1>
+<p class="lead">An orders API on AWS in Node.js and TypeScript. API Gateway and Lambda take the request, DynamoDB stores it, SQS hands it to a worker, and Terraform builds all of it.</p>
+<p><a href="https://github.com/gerardrecinto/serverless-orders-api">Source on GitHub</a> · run it locally with <code>npm install &amp;&amp; npm run dev</code></p>
+
+<h2>How a request flows</h2>
+<div class="card">
+<svg viewBox="0 0 860 170" width="100%" role="img" aria-label="Client to API Gateway to API Lambda, which writes DynamoDB and sends to SQS; SQS triggers the worker Lambda; failed messages go to a dead-letter queue">
+<rect class="b" x="10" y="60" width="90" height="46" rx="6"/><text x="28" y="88">Client</text>
+<rect class="b" x="140" y="60" width="110" height="46" rx="6"/><text x="153" y="88">API Gateway</text>
+<rect class="b" x="290" y="60" width="110" height="46" rx="6"/><text x="306" y="88">API Lambda</text>
+<rect class="b" x="440" y="14" width="110" height="46" rx="6"/><text x="462" y="42">DynamoDB</text>
+<rect class="b" x="440" y="106" width="110" height="46" rx="6"/><text x="474" y="134">SQS</text>
+<rect class="b" x="600" y="106" width="110" height="46" rx="6"/><text x="610" y="134">Worker Lambda</text>
+<rect class="b" x="740" y="106" width="110" height="46" rx="6"/><text x="762" y="134">Dead-letter</text>
+<path class="l" d="M100 83H140M250 83H290M400 75L440 40M400 92L440 126M550 129H600M710 129H740M655 106L520 50"/>
+<text x="560" y="30">worker updates status</text>
+</svg>
+</div>
+
+<h2>Try it: the real handler runs in your browser</h2>
+<p class="lead" style="font-size:15px">This page loads the same TypeScript handler that Lambda runs, with an in-memory store in place of DynamoDB and SQS. Nothing leaves your browser.</p>
+<div class="grid">
+<div class="card">
+<label for="key">Idempotency-Key</label><input id="key" value="order-1001">
+<label for="body">POST /orders body</label>
+<textarea id="body" rows="7">{"customerId":"c-42","items":[{"sku":"A1","qty":2,"priceCents":500},{"sku":"B2","qty":1,"priceCents":1250}]}</textarea>
+<div class="row"><button id="post">POST /orders</button><button id="get" class="alt">GET /orders/{id}</button><button id="drain" class="alt">Run worker</button></div>
+<p style="margin:10px 0 0;font-size:13px;color:var(--mut)">Send the same key twice: you get 200 with the same order and no second message. Break the body to see a 422.</p>
+</div>
+<div class="card"><div style="font-size:13px;color:var(--mut)">Response</div><pre id="out">Press POST /orders.</pre>
+<div style="font-size:13px;color:var(--mut);margin-top:12px">Queue depth: <span id="q">0</span></div>
+<div style="font-size:13px;color:var(--mut);margin-top:12px">Structured log</div><pre id="log" style="max-height:140px;overflow:auto"></pre></div>
+</div>
+
+<h2>Routes</h2>
+<div class="card"><table>
+<tr><th>Route</th><th>Result</th></tr>
+<tr><td><code>GET /health</code></td><td>200</td></tr>
+<tr><td><code>POST /orders</code></td><td>201 new, 200 same key again, 400 no key or bad JSON, 413 over 64 KB, 422 field errors</td></tr>
+<tr><td><code>GET /orders/{id}</code></td><td>200, 404, 400 for a malformed id</td></tr>
+</table></div>
+
+<h2>What is in the repo</h2>
+<div class="card"><ul style="margin:0;padding-left:20px">
+<li>TypeScript handlers with injected dependencies; 16 tests including redelivery and partial batch failure.</li>
+<li>Terraform modules for data, functions, API and alarms. IAM is least privilege per function and a test fails on any wildcard action.</li>
+<li>Alarms for 5xx, p99 latency, function errors, a non-empty dead-letter queue and queue age.</li>
+<li>CI runs type check, tests, build, <code>terraform fmt</code> and <code>validate</code>, and a Trivy scan. Deploy uses GitHub OIDC, no stored keys.</li>
+</ul></div>
+</main>
+<script src="api.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+let lastId = "";
+async function show(r) {
+  $("out").textContent = r.status + "\n" + JSON.stringify(JSON.parse(r.body), null, 2);
+  $("out").className = r.status < 300 ? "ok" : "bad";
+  try { lastId = JSON.parse(r.body).id || lastId; } catch {}
+  $("q").textContent = demo.queued();
+  const l = demo.logs(); if (l.length) $("log").textContent = l.join("\n") + "\n" + $("log").textContent;
+}
+$("post").onclick = async () => show(await demo.call("POST /orders", { "idempotency-key": $("key").value }, $("body").value));
+$("get").onclick = async () => show(await demo.call("GET /orders/{id}", {}, "", lastId || "ord_000000000000000000000000"));
+$("drain").onclick = async () => { const n = await demo.drain(); $("q").textContent = demo.queued(); const l = demo.logs(); $("log").textContent = l.join("\n") + "\n" + $("log").textContent; $("out").textContent = "Worker handled " + n + " message(s). Press GET to see status processed."; $("out").className = ""; };
+</script>
+</body>
+</html>

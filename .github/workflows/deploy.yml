@@ -1,0 +1,51 @@
+name: Deploy
+
+# Manual. Needs an AWS role that trusts this repo through GitHub OIDC and an
+# S3 bucket and DynamoDB table for Terraform state. See docs/RUNBOOK.md.
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "Apply the plan (otherwise plan only)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    environment: dev
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+      - name: Init
+        working-directory: terraform/envs/dev
+        run: |
+          terraform init -input=false \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="key=orders/dev.tfstate" \
+            -backend-config="region=${{ vars.AWS_REGION }}" \
+            -backend-config="dynamodb_table=${{ vars.TF_LOCK_TABLE }}"
+      - name: Plan
+        working-directory: terraform/envs/dev
+        run: terraform plan -input=false -out=tfplan
+      - name: Apply
+        if: inputs.apply
+        working-directory: terraform/envs/dev
+        run: terraform apply -input=false tfplan
